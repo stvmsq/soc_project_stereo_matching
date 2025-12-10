@@ -4,6 +4,7 @@ HostScript_Server/data/all/
 HostScript_Server/data/data_scene_flow/
 HostScript_Server/data/data_scene_flow/
 HostScript_Server/data/devkit_scene_flow/
+HostScript_Server/data/data_scene_flow_calib/
 
 # ignore Vivado files without tcl
 ZedBoard/Vivado/

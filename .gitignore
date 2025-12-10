@@ -11,22 +11,11 @@ ZedBoard/Vivado/
 !ZedBoard/Vivado/*.tcl
 
 # ignore unnecessary Vitis files
-# ==========================
-# Rigel / Tools
-# ==========================
 .rigel_lopper/
 .rigel_lopper_temp_platform/
-
-# ==========================
-# Vitis IDE / Build
-# ==========================
 _ide/
 lwip_tcp_perf_client/_ide/
 lwip_tcp_perf_client/build/
-
-# ==========================
-# Platform / Vitis
-# ==========================
 ZedBoard/Vitis/platform/Debug/
 ZedBoard/Vitis/platform/Release/
 ZedBoard/Vitis/platform/logs/
@@ -39,7 +28,6 @@ ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/libsrc/**
 ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/include/**
 ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/lib/**
 ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/hw_artifacts/**
-# Ignore temporary files
 *.log
 *.jou
 *.str
@@ -48,18 +36,7 @@ ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/hw_artifact
 *.bin
 *.d
 *.obj
-
 **/.cache/*
 
-# Keep only essential platform files
-!platform/*.xpfm
-!platform/**/*.bsp
-!platform/**/*.h
-
-# ==========================
-# OS / editor files
-# ==========================
-*.DS_Store
-*.swp
-*.bak
-*.tmp
+# ignore vscode settings
+SemiGlobalMatching/.vscode/

@@ -11,19 +11,55 @@ ZedBoard/Vivado/
 !ZedBoard/Vivado/*.tcl
 
 # ignore unnecessary Vitis files
-# Ignore build output directory
-/build
-/export
-# Ignore object files and dependent files
-.o
-.d
-#Ignore logs folder and log files
-/logs
-.log
-#Ignore lock files
-.lock
-.bin
-.pdi
-.vitisWorkspace.json
-_ide/logs
-_ide/.wsdata
+# ==========================
+# Rigel / Tools
+# ==========================
+.rigel_lopper/
+.rigel_lopper_temp_platform/
+
+# ==========================
+# Vitis IDE / Build
+# ==========================
+_ide/
+lwip_tcp_perf_client/_ide/
+lwip_tcp_perf_client/build/
+
+# ==========================
+# Platform / Vitis
+# ==========================
+ZedBoard/Vitis/platform/Debug/
+ZedBoard/Vitis/platform/Release/
+ZedBoard/Vitis/platform/logs/
+ZedBoard/Vitis/platform/export/
+ZedBoard/Vitis/platform/hw/
+ZedBoard/Vitis/platform/zynq_fsbl/build/
+ZedBoard/Vitis/platform/zynq_fsbl/linker_files/
+ZedBoard/Vitis/platform/zynq_fsbl/zynq_fsbl_bsp/libsrc/**
+ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/libsrc/**
+ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/include/**
+ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/lib/**
+ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp/hw_artifacts/**
+# Ignore temporary files
+*.log
+*.jou
+*.str
+*.o
+*.elf
+*.bin
+*.d
+*.obj
+
+**/.cache/*
+
+# Keep only essential platform files
+!platform/*.xpfm
+!platform/**/*.bsp
+!platform/**/*.h
+
+# ==========================
+# OS / editor files
+# ==========================
+*.DS_Store
+*.swp
+*.bak
+*.tmp

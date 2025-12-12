@@ -42,15 +42,15 @@ extern "C" {
 #include "xil_printf.h"
 #include "platform.h"
 
-/* used as indices into kLabel[] */
-enum {
+#include "frame_buffer.h"
+
+/*enum {
 	KCONV_UNIT,
 	KCONV_KILO,
 	KCONV_MEGA,
 	KCONV_GIGA,
 };
 
-/* labels for formats [KMG] */
 const char kLabel[] =
 {
 	' ',
@@ -59,19 +59,14 @@ const char kLabel[] =
 	'G'
 };
 
-/* used as type of print */
 enum measure_t {
 	BYTES,
 	SPEED
 };
 
-/* Report Type */
 enum report_type {
-	/* The Intermediate report */
 	INTER_REPORT,
-	/* The client side test is done */
 	TCP_DONE_CLIENT,
-	/* Remote side aborted the test */
 	TCP_ABORTED_REMOTE
 };
 
@@ -88,10 +83,25 @@ struct perf_stats {
 	u64_t end_time;
 	u64_t total_bytes;
 	struct interim_report i_report;
-};
+};*/
 
+typedef enum {
+    WAIT,      // 0
+	WAIT_FOR_FRAME,      // 1
+    RECEIVE_1,   // 2
+	RECEIVE_2,	// 3
+	SEND_IMG,	// 4
+	NOTIFY_TO_CLOSE, // 5
+    CLOSE,       // 6
+} ConnectionStatus_t;
+
+void start_tcp_client(SharedMemory_t *frame_buffer);
+err_t send_depth_img(void);
+err_t request_new_frame(void);
+ConnectionStatus_t get_connection_status(void);
+void tcp_connection_close(void);
 /* seconds between periodic bandwidth reports */
-#define INTERIM_REPORT_INTERVAL 5
+//#define INTERIM_REPORT_INTERVAL 5
 
 /* Client port to connect */
 #define TCP_CONN_PORT 5001
@@ -104,10 +114,10 @@ struct perf_stats {
 #define TCP_SERVER_IPV6_ADDRESS "fe80::6600:6aff:fe71:fde6"
 #else
 /* Server to connect with */
-#define TCP_SERVER_IP_ADDRESS "192.168.1.100"
+#define TCP_SERVER_IP_ADDRESS "192.168.1.20"
 #endif
 
-#define TCP_SEND_BUFSIZE (5*TCP_MSS)
+// #define TCP_SEND_BUFSIZE (5*TCP_MSS)
 
 #ifdef __cplusplus
 }

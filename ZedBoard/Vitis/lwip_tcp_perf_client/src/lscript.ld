@@ -14,11 +14,12 @@ _UNDEF_STACK_SIZE = DEFINED(_UNDEF_STACK_SIZE) ? _UNDEF_STACK_SIZE : 1024;
 
 MEMORY
 {
-	ps7_ddr_0_memory_0 : ORIGIN = 0x100000, LENGTH = 0x3ff00000
+	ps7_ddr_0_memory_0 : ORIGIN = 0x100000, LENGTH = 0x3ef00000
 	ps7_qspi_linear_0_memory_0 : ORIGIN = 0xfc000000, LENGTH = 0x1000000
 	ps7_ram_0_memory_0 : ORIGIN = 0x0, LENGTH = 0x30000
 	ps7_ram_1_memory_1 : ORIGIN = 0xffff0000, LENGTH = 0xfe00
-}
+	ps7_shared_memory : ORIGIN = 0x3f000000, LENGTH = 0x01000000
+ }
 
 /* Specify the default entry point to the program */
 
@@ -287,6 +288,10 @@ _SDA2_BASE_ = __sdata2_start + ((__sbss2_end - __sdata2_start) / 2 );
    . = ALIGN(16);
    __undef_stack = .;
 } > ps7_ddr_0_memory_0
+
+.ps7_shared_memory (NOLOAD) : {
+   *(.ps7_shared_memory)
+} > ps7_shared_memory
 
 end = .;
 }

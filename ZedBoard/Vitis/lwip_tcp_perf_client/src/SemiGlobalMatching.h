@@ -1,0 +1,4 @@
+#ifndef SEMI_GLOBAL_MATCHING_H
+#define SEMI_GLOBAL_MATCHING_H
+
+#endif

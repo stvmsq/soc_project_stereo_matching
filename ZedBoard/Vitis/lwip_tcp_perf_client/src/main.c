@@ -39,6 +39,10 @@
 #include "lwip/init.h"
 #include "lwip/inet.h"
 
+#include "tcp_perf_client.h"
+#include "frame_buffer.h"
+#include "stereo_matching.h"
+
 #if LWIP_IPV6==1
 #include "lwip/ip6_addr.h"
 #include "lwip/ip6.h"
@@ -58,9 +62,6 @@ extern volatile int TcpFastTmrFlag;
 extern volatile int TcpSlowTmrFlag;
 
 void platform_enable_interrupts(void);
-void start_application(void);
-void transfer_data(void);
-void print_app_header(void);
 
 #if defined (__arm__) && !defined (ARMR5)
 #if XPAR_GIGE_PCS_PMA_SGMII_CORE_PRESENT == 1 || \
@@ -77,6 +78,9 @@ int IicPhyReset(void);
 #endif
 
 struct netif server_netif;
+
+__attribute__((section(".ps7_frame_buffer")))
+SharedMemory_t frame_buffer;
 
 #if LWIP_IPV6==1
 static void print_ipv6(char *msg, ip_addr_t *ip)
@@ -103,19 +107,19 @@ static void assign_default_ip(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 {
 	int err;
 
-	xil_printf("Configuring default IP %s \r\n", DEFAULT_IP_ADDRESS);
+	xil_printf("INFO: Configuring default IP %s \r\n", DEFAULT_IP_ADDRESS);
 
 	err = inet_aton(DEFAULT_IP_ADDRESS, ip);
 	if (!err)
-		xil_printf("Invalid default IP address: %d\r\n", err);
+		xil_printf("ERROR: Invalid default IP address: %d\r\n", err);
 
 	err = inet_aton(DEFAULT_IP_MASK, mask);
 	if (!err)
-		xil_printf("Invalid default IP MASK: %d\r\n", err);
+		xil_printf("ERROR: Invalid default IP MASK: %d\r\n", err);
 
 	err = inet_aton(DEFAULT_GW_ADDRESS, gw);
 	if (!err)
-		xil_printf("Invalid default gateway address: %d\r\n", err);
+		xil_printf("ERROR: Invalid default gateway address: %d\r\n", err);
 }
 #endif /* LWIP_IPV6 */
 
@@ -146,7 +150,7 @@ int main(void)
 	init_platform();
 
 	xil_printf("\r\n\r\n");
-	xil_printf("-----lwIP RAW Mode TCP Client Application-----\r\n");
+	xil_printf("-----Stereo Matching (SGM) Application-----\r\n");
 
 	/* initialize lwIP */
 	lwip_init();
@@ -154,7 +158,7 @@ int main(void)
 	/* Add network interface to the netif_list, and set it as default */
 	if (!xemac_add(netif, NULL, NULL, NULL, mac_ethernet_address,
 				PLATFORM_EMAC_BASEADDR)) {
-		xil_printf("Error adding N/W interface\r\n");
+		xil_printf("ERROR: Error adding N/W interface\r\n");
 		return -1;
 	}
 
@@ -162,7 +166,7 @@ int main(void)
 	netif->ip6_autoconfig_enabled = 1;
 	netif_create_ip6_linklocal_address(netif, 1);
 	netif_ip6_addr_set_state(netif, 0, IP6_ADDR_VALID);
-	print_ipv6("\n\rlink local IPv6 address is:",&netif->ip6_addr[0]);
+	print_ipv6("\n\rINFO: link local IPv6 address is:",&netif->ip6_addr[0]);
 #endif /* LWIP_IPV6 */
 	netif_set_default(netif);
 
@@ -181,13 +185,13 @@ int main(void)
 	 * the predefined regular intervals after starting the client.
 	 */
 	dhcp_start(netif);
-	dhcp_timoutcntr = 240;
+	dhcp_timoutcntr = 0;
 	while (((netif->ip_addr.addr) == 0) && (dhcp_timoutcntr > 0))
 		xemacif_input(netif);
 
 	if (dhcp_timoutcntr <= 0) {
 		if ((netif->ip_addr.addr) == 0) {
-			xil_printf("ERROR: DHCP request timed out\r\n");
+			xil_printf("WARNING: DHCP request timed out\r\n");
 			assign_default_ip(&(netif->ip_addr),
 					&(netif->netmask), &(netif->gw));
 		}
@@ -201,11 +205,10 @@ int main(void)
 #endif /* LWIP_IPV6 */
 	xil_printf("\r\n");
 
-	/* print app header */
-	print_app_header();
 
-	/* start the application*/
-	start_application();
+	/* init and start the application*/
+	init_shared_memory(&frame_buffer);
+	start_tcp_client(&frame_buffer);
 	xil_printf("\r\n");
 
 	while (1) {
@@ -218,7 +221,22 @@ int main(void)
 			TcpSlowTmrFlag = 0;
 		}
 		xemacif_input(netif);
-		transfer_data();
+		if(get_connection_status() == WAIT && (frame_buffer.stereo_frame[next_frame_id(&frame_buffer)].status == INVALID || frame_buffer.stereo_frame[next_frame_id(&frame_buffer)].status == DONE)){
+			request_new_frame();
+		}
+		if(frame_buffer.stereo_frame[next_frame_id(&frame_buffer)].status == READY && (frame_buffer.stereo_frame[frame_buffer.current_frame_id].status == INVALID || frame_buffer.stereo_frame[frame_buffer.current_frame_id].status == DONE) && (frame_buffer.last_depth_frame.status == INVALID || frame_buffer.last_depth_frame.status == DONE)){
+			frame_buffer.current_frame_id = next_frame_id(&frame_buffer);
+			convert_to_gray(&frame_buffer);
+			xil_printf("INFO: convert img %d to gray and save in depth img\n\r", frame_buffer.last_depth_frame.frame_id);
+			frame_buffer.stereo_frame[frame_buffer.current_frame_id].status = DONE;
+			frame_buffer.last_depth_frame.status=READY;
+		}
+		if ((get_connection_status() == WAIT || get_connection_status() == SEND_IMG || get_connection_status() == NOTIFY_TO_CLOSE) && frame_buffer.last_depth_frame.status == READY){
+			send_depth_img();
+			if(get_connection_status() == NOTIFY_TO_CLOSE && frame_buffer.last_depth_frame.status == DONE){
+				tcp_connection_close();
+			}
+		}
 	}
 
 	/* never reached */

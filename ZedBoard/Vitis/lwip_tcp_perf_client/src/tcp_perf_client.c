@@ -1,144 +1,23 @@
-/*
- * Copyright (C) 2018 - 2019 Xilinx, Inc.
- * Copyright (C) 2019 - 2024 Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
- * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
- * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
- * OF SUCH DAMAGE.
- *
- */
-
-/* Connection handle for a TCP Client session */
-
 #include "tcp_perf_client.h"
+#include <stdint.h>
+#include <xil_printf.h>
+#include "frame_buffer.h"
+#include "lwip/err.h"
+#include "lwip/tcp.h"
 
 static struct tcp_pcb *c_pcb;
-static char send_buf[TCP_SEND_BUFSIZE];
-static struct perf_stats client;
 
-void print_app_header()
-{
-#if LWIP_IPV6==1
-	xil_printf("TCP client connecting to %s on port %d\r\n",
-			TCP_SERVER_IPV6_ADDRESS, TCP_CONN_PORT);
-	xil_printf("On Host: Run $iperf -V -s -i %d -w 2M\r\n",
-			INTERIM_REPORT_INTERVAL);
-#else
-	xil_printf("TCP client connecting to %s on port %d\r\n",
-			TCP_SERVER_IP_ADDRESS, TCP_CONN_PORT);
-	xil_printf("On Host: Run $iperf -s -i %d -w 2M\r\n",
-			INTERIM_REPORT_INTERVAL);
-#endif /* LWIP_IPV6 */
+ConnectionStatus_t connection_status;
+SharedMemory_t *shared_memory;
+
+ConnectionStatus_t get_connection_status(void){
+	return connection_status;
 }
-
-static void print_tcp_conn_stats()
-{
-#if LWIP_IPv6==1
-	xil_printf("[%3d] local %s port %d connected with ",
-			client.client_id, inet6_ntoa(c_pcb->local_ip),
-			c_pcb->local_port);
-	xil_printf("%s port %d\r\n",inet6_ntoa(c_pcb->remote_ip),
-			c_pcb->remote_port);
-#else
-	xil_printf("[%3d] local %s port %d connected with ",
-			client.client_id, inet_ntoa(c_pcb->local_ip),
-			c_pcb->local_port);
-	xil_printf("%s port %d\r\n",inet_ntoa(c_pcb->remote_ip),
-			c_pcb->remote_port);
-#endif /* LWIP_IPV6 */
-
-	xil_printf("[ ID] Interval\t\tTransfer   Bandwidth\n\r");
-}
-
-static void stats_buffer(char* outString,
-		double data, enum measure_t type)
-{
-	int conv = KCONV_UNIT;
-	const char *format;
-	double unit = 1024.0;
-
-	if (type == SPEED)
-		unit = 1000.0;
-
-	while (data >= unit && conv <= KCONV_GIGA) {
-		data /= unit;
-		conv++;
-	}
-
-	/* Fit data in 4 places */
-	if (data < 9.995) { /* 9.995 rounded to 10.0 */
-		format = "%4.2f %c"; /* #.## */
-	} else if (data < 99.95) { /* 99.95 rounded to 100 */
-		format = "%4.1f %c"; /* ##.# */
-	} else {
-		format = "%4.0f %c"; /* #### */
-	}
-	sprintf(outString, format, data, kLabel[conv]);
-}
-
-
-/** The report function of a TCP client session */
-static void tcp_conn_report(u64_t diff,
-		enum report_type report_type)
-{
-	u64_t total_len;
-	double duration, bandwidth = 0;
-	char data[16], perf[16], time[64];
-
-	if (report_type == INTER_REPORT) {
-		total_len = client.i_report.total_bytes;
-	} else {
-		client.i_report.last_report_time = 0;
-		total_len = client.total_bytes;
-	}
-
-	/* Converting duration from milliseconds to secs,
-	 * and bandwidth to bits/sec .
-	 */
-	duration = diff / 20.0; /* secs */
-	if (duration)
-		bandwidth = (total_len / duration) * 8.0;
-
-	stats_buffer(data, total_len, BYTES);
-	stats_buffer(perf, bandwidth, SPEED);
-	/* On 32-bit platforms, xil_printf is not able to print
-	 * u64_t values, so converting these values in strings and
-	 * displaying results
-	 */
-	sprintf(time, "%4.1f-%4.1f sec",
-			(double)client.i_report.last_report_time,
-			(double)(client.i_report.last_report_time + duration));
-	xil_printf("[%3d] %s  %sBytes  %sbits/sec\n\r", client.client_id,
-			time, data, perf);
-
-	if (report_type == INTER_REPORT)
-		client.i_report.last_report_time += duration;
-}
-
 /** Close a tcp session */
 static void tcp_client_close(struct tcp_pcb *pcb)
 {
 	err_t err;
-
+	xil_printf("INFO: Connection close\r\n");
 	if (pcb != NULL) {
 		tcp_sent(pcb, NULL);
 		tcp_err(pcb, NULL);
@@ -150,90 +29,225 @@ static void tcp_client_close(struct tcp_pcb *pcb)
 	}
 }
 
+void tcp_connection_close(void){
+	tcp_client_close(c_pcb);
+}
+
 /** Error callback, tcp session aborted */
 static void tcp_client_err(void *arg, err_t err)
 {
-	LWIP_UNUSED_ARG(err);
-	u64_t now = get_time_ms();
-	u64_t diff_ms = now - client.start_time;
-
+	if (err == ERR_RST){
+		xil_printf("ERROR: Connection reset! Is the Server running with IP: %s and Port: %d ?\n\r", TCP_SERVER_IP_ADDRESS, TCP_CONN_PORT);
+	}else{
+		xil_printf("ERROR: TCP error: %s (%d)\r\n", lwip_strerr(err), err);
+	}
+	// LWIP_UNUSED_ARG(err);
+	
 	tcp_client_close(c_pcb);
 	c_pcb = NULL;
-	tcp_conn_report(diff_ms, TCP_ABORTED_REMOTE);
-	xil_printf("TCP connection aborted\n\r");
+	xil_printf("INFO: TCP connection aborted\n\r");
 }
 
-static err_t tcp_send_perf_traffic(void)
-{
+static err_t tcp_send_message(const uint8_t *buffer, uint16_t length){
 	err_t err;
-	u8_t apiflags = TCP_WRITE_FLAG_COPY | TCP_WRITE_FLAG_MORE;
-
 	if (c_pcb == NULL) {
 		return ERR_CONN;
 	}
-
-#ifdef __MICROBLAZE__
-	/* Zero-copy pbufs is used to get maximum performance for Microblaze.
-	 * For Zynq A9, ZynqMP A53 and R5 zero-copy pbufs does not give
-	 * significant improvement hense not used. */
-	apiflags = 0;
-#endif
-
-	while (tcp_sndbuf(c_pcb) > TCP_SEND_BUFSIZE) {
-		err = tcp_write(c_pcb, send_buf, TCP_SEND_BUFSIZE, apiflags);
-		if (err != ERR_OK) {
-			xil_printf("TCP client: Error on tcp_write: %d\r\n",
-					err);
-			return err;
-		}
-
-		err = tcp_output(c_pcb);
-		if (err != ERR_OK) {
-			xil_printf("TCP client: Error on tcp_output: %d\r\n",
-					err);
-			return err;
-		}
-		client.total_bytes += TCP_SEND_BUFSIZE;
-		client.i_report.total_bytes += TCP_SEND_BUFSIZE;
+	if (tcp_sndbuf(c_pcb) < length) {
+		xil_printf("WARNING: Send buffer full, cannot write!\r\n");
+		return ERR_MEM;
 	}
+	err = tcp_write(c_pcb, buffer, length, TCP_WRITE_FLAG_COPY);
+	if (err != ERR_OK) {
+		xil_printf("ERROR: TCP client: Error on tcp_write: %d\r\n", err);
+		return err;
+	}
+	err = tcp_output(c_pcb);
+	if (err != ERR_OK) {
+		xil_printf("ERROR: TCP client: Error on tcp_output: %d\r\n", err);
+		return err;
+	}
+	return ERR_OK;
+}
 
-	if (client.end_time || client.i_report.report_interval_time) {
-		u64_t now = get_time_ms();
-		if (client.i_report.report_interval_time) {
-			if (client.i_report.start_time) {
-				u64_t diff_ms = now - client.i_report.start_time;
-				u64_t rtime_ms = client.i_report.report_interval_time;
-				if (diff_ms >= rtime_ms) {
-					tcp_conn_report(diff_ms, INTER_REPORT);
-					client.i_report.start_time = 0;
-					client.i_report.total_bytes = 0;
-				}
-			} else {
-				client.i_report.start_time = now;
-			}
+err_t request_new_frame(void){
+	if(connection_status != WAIT) {
+		xil_printf("WARNING: request new frame during operation: %d\r\n", connection_status);
+		return ERR_INPROGRESS;
+	}
+	if(shared_memory->stereo_frame[next_frame_id(shared_memory)].status == INVALID || shared_memory->stereo_frame[next_frame_id(shared_memory)].status == DONE){
+		uint8_t buffer[1];
+		buffer[0] = 1;
+		if (tcp_send_message(buffer, sizeof(buffer)) == ERR_OK) {
+			//ToDO: notify user
+			connection_status = WAIT_FOR_FRAME;
 		}
+	} else {
+		xil_printf("WARNING: request new frame, but old frame is not invalid or done.\n\r");
+	}
+	return ERR_OK;
+}
 
-		if (client.end_time) {
-			/* this session is time-limited */
-			u64_t diff_ms = now - client.start_time;
-			if (diff_ms >= client.end_time) {
-				/* time specified is over,
-				 * close the connection */
-				tcp_conn_report(diff_ms, TCP_DONE_CLIENT);
-				xil_printf("TCP test passed Successfully\n\r");
-				tcp_client_close(c_pcb);
-				c_pcb = NULL;
-				return ERR_OK;
+int32_t send_index = -1;
+err_t send_depth_img(void){
+	if (connection_status != WAIT && connection_status != SEND_IMG) {
+		 return ERR_INPROGRESS;
+	}
+	if (connection_status == WAIT){
+		if (send_index == -1 && shared_memory->last_depth_frame.status == READY){
+			// send_index and status condition should alway be fuilfilled here
+			connection_status = SEND_IMG;
+		} else{
+			xil_printf("WARING: call send_depth_img in wrong state: %d and status: %d \r\n", send_index, shared_memory->last_depth_frame.status);
+			return ERR_VAL;
+		}
+	}
+	if (shared_memory->last_depth_frame.status == READY) {
+		if (send_index == -1 && tcp_sndbuf(c_pcb) >= 8) {
+			// Buffer for 1B (type) + 1 x uint32 + 2x uint16 = 9 Bytes
+			uint8_t header[9];
+			header[0] = 3;
+			header[1] = (uint8_t)(shared_memory->last_depth_frame.frame_id);
+			header[2] = (uint8_t)(shared_memory->last_depth_frame.frame_id >> 8);
+			header[3] = (uint8_t)(shared_memory->last_depth_frame.frame_id >> 16);
+			header[4] = (uint8_t)(shared_memory->last_depth_frame.frame_id >> 24);
+
+			header[5] = (uint8_t)(shared_memory->last_depth_frame.width);
+			header[6] = (uint8_t)(shared_memory->last_depth_frame.width >> 8);
+
+			header[7] = (uint8_t)(shared_memory->last_depth_frame.height);
+			header[8] = (uint8_t)(shared_memory->last_depth_frame.height >> 8);
+
+			if (tcp_send_message(header, sizeof(header)) == ERR_OK) {
+				send_index = 0;
 			}
+		} else if (send_index >= 0 && send_index < IMG_HEIGHT * IMG_WIDTH * 4) {
+			uint16_t sndbuf = tcp_sndbuf(c_pcb);
+			if (sndbuf > 0) {
+				// number of bytes we can send now
+        		uint16_t chunk = (IMG_HEIGHT * IMG_WIDTH * 4 - send_index < sndbuf) ? IMG_HEIGHT * IMG_WIDTH * 4 - send_index : sndbuf;
+				const uint8_t *ptr = (const uint8_t*)shared_memory->last_depth_frame.depth + send_index;
+				if (tcp_send_message(ptr, chunk) == ERR_OK) {
+					send_index += chunk;
+				}
+			}
+		} else if (send_index >= IMG_HEIGHT * IMG_WIDTH * 4) {
+			xil_printf("INFO: send depth img: %d\r\n", shared_memory->last_depth_frame.frame_id);
+			shared_memory->last_depth_frame.status = DONE;
+			connection_status = WAIT;
+			send_index = -1;
 		}
 	}
 	return ERR_OK;
 }
 
+
 /** TCP sent callback, try to send more data */
 static err_t tcp_client_sent(void *arg, struct tcp_pcb *tpcb, u16_t len)
 {
-	return tcp_send_perf_traffic();
+	return 0;
+	// return tcp_send_perf_traffic();
+}
+
+static uint32_t rec_index = 1;
+
+static err_t recv_img(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
+	struct pbuf *q;
+	// Durch alle pbufs iterieren
+    for (q = p; q != NULL; q = q->next) {
+        uint8_t *payload = (uint8_t *)q->payload;
+		for (uint16_t i = 0; i < q->len;) {
+			uint16_t byte_left = q->len - i;
+			if (rec_index == 1 && byte_left >= 8) {
+				// xil_printf("INFO: copy parameter\n\r");
+				// 4B frame_id + 2B width + 2B height
+				memcpy(&shared_memory->stereo_frame[next_frame_id(shared_memory)].frame_id, &payload[i], 8);
+				rec_index += 8;
+				i+=8;
+				if (shared_memory->stereo_frame[next_frame_id(shared_memory)].width != IMG_WIDTH || shared_memory->stereo_frame[next_frame_id(shared_memory)].height != IMG_HEIGHT) {
+					xil_printf("ERROR: Wrong image size, schould %dx%d but is %dx%d\n\r", IMG_WIDTH, IMG_HEIGHT, (int)shared_memory->stereo_frame[next_frame_id(shared_memory)].width, (int)shared_memory->stereo_frame[next_frame_id(shared_memory)].height);
+				}
+				if(connection_status == RECEIVE_2){
+					// xil_printf("INFO: skip calib\n\r");
+					// if no calib data send (type = 2), skip next rec_index
+					rec_index += 80;
+				}
+			}else if (rec_index == 9 && connection_status == RECEIVE_1 && byte_left >= 80) {
+				// xil_printf("INFO: copy calib\n\r");
+				// 80B calib
+				memcpy(&shared_memory->stereo_frame[next_frame_id(shared_memory)].calib, &payload[i], 80);
+				rec_index += 80;
+				i += 80;
+			}else if (rec_index >= 89 && rec_index < 89 + IMG_WIDTH * IMG_HEIGHT * 6) {
+				//copy: blue color frame 0 + green color frame 0 + red color frame 0 + blue color frame 1 + ...
+				// color base + color offset + pixel offset (img offset Implicitly through color offset)
+				uint32_t copy_length = (byte_left < 89 + IMG_WIDTH * IMG_HEIGHT * 6 - rec_index) ? byte_left : 89 + IMG_WIDTH * IMG_HEIGHT * 6 - rec_index;
+				uint8_t *pixel_address = shared_memory->stereo_frame[next_frame_id(shared_memory)].left_blue + rec_index - 89; // IMG_WIDTH * IMG_HEIGHT * index + rec_index - IMG_WIDTH * IMG_HEIGHT * index;
+				memcpy(pixel_address, &payload[i], copy_length);
+				
+				i += copy_length;
+				rec_index += copy_length;
+			} else {
+				xil_printf("WARING: invalid TCP data len error\n\r");
+			}
+		}
+    }
+	if(rec_index == 89 + IMG_WIDTH * IMG_HEIGHT * 6){
+		shared_memory->stereo_frame[next_frame_id(shared_memory)].status=READY;
+		xil_printf("INFO: receive image: %d\n\r", shared_memory->stereo_frame[next_frame_id(shared_memory)].frame_id);
+		rec_index = 1;
+		connection_status = WAIT;
+	}
+}
+
+static err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
+                               struct pbuf *p, err_t err)
+{
+	/* do not read the packet if we are not in ESTABLISHED state */
+	if (!p) {
+		tcp_close(tpcb);
+		tcp_recv(tpcb, NULL);
+		return ERR_OK;
+	}
+
+	/* indicate that the packet has been received */
+	tcp_recved(tpcb, p->len);
+
+	if (connection_status == WAIT || connection_status == WAIT_FOR_FRAME) {
+		if (p->len > 0){
+			uint8_t type = *(uint8_t*)p->payload;
+			if(type == 1 || type == 2){
+				if(connection_status != WAIT_FOR_FRAME){
+					xil_printf("WARNING: receive frame in wrong state: %d", connection_status);
+				}
+				connection_status = (type == 1) ? RECEIVE_1 : RECEIVE_2;
+				pbuf_header(p, -1);   // remove first (read) byte
+				recv_img(arg, tpcb, p, err);
+			} else if (type == 3) {
+				// confirm receipt
+				// not used at moment
+			} else if (type == 0) {
+				xil_printf("INFO: receive notification to close connection (probably due to the completed test run)\n\r");
+				connection_status = NOTIFY_TO_CLOSE;
+			} else{
+				xil_printf("WARNING: receive illegal type: %d\n\r", type);
+			}
+		}else {
+			xil_printf("WARNING: message len < 1\n\r");
+		}
+	} else if (connection_status == RECEIVE_1 || connection_status == RECEIVE_2) {
+		recv_img(arg, tpcb, p, err);
+	} else if(connection_status == CLOSE) {
+		tcp_client_close(tpcb);
+		xil_printf("WARNING: receive message in CLOSE status\n\r");
+	} else {
+		// illegal send time
+		xil_printf("WARNING: receive img at invalid time and status: %d\n\r", connection_status);
+	}
+
+	/* free the received pbuf */
+	pbuf_free(p);
+	return ERR_OK;
 }
 
 /** TCP connected callback (active connection), send data now */
@@ -241,47 +255,32 @@ static err_t tcp_client_connected(void *arg, struct tcp_pcb *tpcb, err_t err)
 {
 	if (err != ERR_OK) {
 		tcp_client_close(tpcb);
-		xil_printf("Connection error\n\r");
+		xil_printf("ERROR: Connection error\n\r");
 		return err;
 	}
 	/* store state */
 	c_pcb = tpcb;
 
-	client.start_time = get_time_ms();
-	client.end_time = TCP_TIME_INTERVAL * 20; /* ms */
-	client.client_id++;
-	client.total_bytes = 0;
-
-	/* report interval time in ms */
-	client.i_report.report_interval_time = INTERIM_REPORT_INTERVAL * 20;
-	client.i_report.last_report_time = 0;
-	client.i_report.start_time = 0;
-	client.i_report.total_bytes = 0;
-
-	print_tcp_conn_stats();
-
 	/* set callback values & functions */
 	tcp_arg(c_pcb, NULL);
 	tcp_sent(c_pcb, tcp_client_sent);
 	tcp_err(c_pcb, tcp_client_err);
+	tcp_recv(tpcb, recv_callback);
 
 	/* initiate data transfer */
+	connection_status = WAIT;
+	xil_printf("INFO: Successfully connected to server\r\n");
 	return ERR_OK;
 }
 
-void transfer_data(void)
-{
-	if (client.client_id)
-		tcp_send_perf_traffic();
-}
-
-void start_application(void)
+void start_tcp_client(SharedMemory_t *frame_buffer)
 {
 	err_t err;
 	struct tcp_pcb* pcb;
 	ip_addr_t remote_addr;
-	u32_t i;
 
+	shared_memory = frame_buffer;
+	connection_status = CLOSE;
 #if LWIP_IPV6==1
 	remote_addr.type= IPADDR_TYPE_V6;
 	err = inet6_aton(TCP_SERVER_IPV6_ADDRESS, &remote_addr);
@@ -290,29 +289,25 @@ void start_application(void)
 #endif /* LWIP_IPV6 */
 
 	if (!err) {
-		xil_printf("Invalid Server IP address: %d\r\n", err);
+		xil_printf("ERROR: Invalid Server IP address: %d\r\n", err);
 		return;
 	}
 
 	/* Create Client PCB */
 	pcb = tcp_new_ip_type(IPADDR_TYPE_ANY);
 	if (!pcb) {
-		xil_printf("Error in PCB creation. out of memory\r\n");
+		xil_printf("ERROR: Error in PCB creation. out of memory\r\n");
 		return;
 	}
-
+	tcp_err(pcb, tcp_client_err);
+	xil_printf("INFO: try to connect to: %s\r\n", TCP_SERVER_IP_ADDRESS);
 	err = tcp_connect(pcb, &remote_addr, TCP_CONN_PORT,
 			tcp_client_connected);
 	if (err) {
-		xil_printf("Error on tcp_connect: %d\r\n", err);
+		xil_printf("ERROR: Error on tcp_connect: %d\r\n", err);
 		tcp_client_close(pcb);
 		return;
 	}
-	client.client_id = 0;
-
-	/* initialize data buffer being sent with same as used in iperf */
-	for (i = 0; i < TCP_SEND_BUFSIZE; i++)
-		send_buf[i] = (i % 10) + '0';
 
 	return;
 }

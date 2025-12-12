@@ -1,6 +1,6 @@
 sdt: hw_artifacts/ps7_cortexa9_0_baremetal.dts
 family: Zynq
-path: /home/xilinx/Projects/stere_matching_software/vitis_software/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
+path: /home/xilinx/Projects/soc_project_stereo_matching/ZedBoard/Vitis/platform/ps7_cortexa9_0/standalone_ps7_cortexa9_0/bsp
 config: None
 os: standalone
 os_info:
@@ -364,7 +364,7 @@ lib_config:
       name: XILTIMER_tick_timer
       permission: read_write
       type: string
-      value: None
+      value: ps7_ttc_0
       default: None
       options:
       - None
@@ -669,7 +669,7 @@ lib_config:
       name: lwip220_memp_n_tcp_pcb
       permission: read_write
       type: integer
-      value: '32'
+      value: '1024'
       default: '32'
       options: []
       description: Number of active TCP PCBs. One per active TCP connection

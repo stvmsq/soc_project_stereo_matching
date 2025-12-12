@@ -65,41 +65,6 @@ bool SGM_Initialize(const uint16_t width, const uint16_t height, const SGMOption
     return sgm.is_initialized;
 }
 
-int sum_uint32_array(const uint32_t* arr, int length) {
-    int sum = 0;
-    for (int i = 0; i < length; i++) {
-        sum += (int)arr[i];
-    }
-    return sum;
-}
-int sum_uint8_array(const uint8_t* arr, int length) {
-    int sum = 0;
-    for (int i = 0; i < length; i++) {
-        sum += (int)arr[i];
-    }
-    return sum;
-}
-int sum_uint16_array(const uint16_t* arr, int length) {
-    int sum = 0;
-    for (int i = 0; i < length; i++) {
-        sum += (int)arr[i];
-    }
-    return sum;
-}
-float sum_float_array(const float* arr, int length) {
-    float sum = 0;
-	uint32_t valid_count = 0;
-    for (int i = 0; i < length; i++) {
-		if (arr[i] != INVALID_FLOAT)
-		{
-			sum += (float)arr[i];
-			valid_count++;
-		}
-    }
-	printf(" valid_count: %d\n", valid_count);
-    return sum;
-}
-
 bool SGM_Match(const uint8_t* img_left, const uint8_t* img_right, float* disp_left)
 {
     if(!sgm.is_initialized) {
@@ -114,55 +79,45 @@ bool SGM_Match(const uint8_t* img_left, const uint8_t* img_right, float* disp_le
 
 	/* Census transform */
     // Used: img_left, img_right
-	printf("img_left_sum: %d\n", sum_uint8_array(sgm.img_left, MAX_IMG_SIZE));
     census_transform_5x5(sgm.img_left, sgm.census_left);
-	printf("census_left_sum: %d\n", sum_uint32_array(sgm.census_left, MAX_IMG_SIZE));
-	printf("img_right_sum: %d\n", sum_uint8_array(sgm.img_right, MAX_IMG_SIZE));
     census_transform_5x5(sgm.img_right, sgm.census_right);
-	printf("census_right_sum: %d\n", sum_uint32_array(sgm.census_right, MAX_IMG_SIZE));
+
     // Write: census_left, census_right
 
 	/* Compute matching cost (Hamming on census) */
     // Used: census_left, census_right
     ComputeCost(sgm.census_left, sgm.census_right, sgm.cost_init);
-	printf("cost_init_ sum: %d\n", sum_uint8_array(sgm.cost_init, MAX_DISP_IMG_SIZE));
     // Write: cost_init
 
 	/* Aggregate costs along directions and add into cost_aggr (uint16 sums) */
     // Used: cost_init, img_left
     CostAggregation();
-	printf("cost_aggr_ sum: %d\n", sum_uint16_array(sgm.cost_aggr, MAX_DISP_IMG_SIZE));
     // Write: cost_aggr
 
 	/* Compute disparity from aggregated costs (left-to-right) */
     // Used: cost_aggr
     ComputeDisparity(sgm.cost_aggr, sgm.disp_left, 0);
-	printf("disp_left_ sum: %f\n", sum_float_array(sgm.disp_left, MAX_IMG_SIZE));
     // Write: disp_left
 
     if (sgm.option.is_check_lr) {
 		/* compute disparity from other direction for LR-check */
         // Used: img_right, cost_init
         ComputeDisparity(sgm.cost_aggr, sgm.disp_right, 1);
-		printf("disp_right_ sum: %f\n", sum_float_array(sgm.disp_right, MAX_IMG_SIZE));
         // Write: disp_right
 
         // Used: disp_left, disp_right
         LRCheck(sgm.disp_left, sgm.disp_right);
-		printf("disp_left_ sum: %f\n", sum_float_array(sgm.disp_left, MAX_IMG_SIZE));
         // Write: disp_left
     }
 
     if (sgm.option.is_remove_speckles) {
         // Used: disp_left
         RemoveSpeckles(sgm.disp_left, 1);
-		printf("disp_left_ sum: %f\n", sum_float_array(sgm.disp_left, MAX_IMG_SIZE));
         // Write: disp_left
     }
 
 
     MedianFilter(sgm.disp_left, sgm.disp_left, FILTER_WINDOW_SIZE);
-	printf("disp_left_ sum: %f\n", sum_float_array(sgm.disp_left, MAX_IMG_SIZE));
 
     memcpy(disp_left, sgm.disp_left, (size_t)sgm.height * (size_t)sgm.width * sizeof(float));
 
@@ -418,9 +373,6 @@ static void CostAggregate(const uint8_t* img_data, const uint8_t* cost_init, uin
 
 static void ComputeDisparity(const uint16_t* cost_aggr, float* disparity, int inverse)
 {
-	int c0 = 0;
-	int c1 = 0;
-	int c2 = 0;
     uint16_t cost_local[MAX_DISPARITY_RANGE];
     
 	for (uint16_t i = 0; i < sgm.height; i++) {
@@ -469,14 +421,12 @@ static void ComputeDisparity(const uint16_t* cost_aggr, float* disparity, int in
                 // (min-sec)/min < min*(1-uniquness)
                 if (sec_min_cost - min_cost <= (uint16_t)(min_cost * (1 - sgm.option.uniqueness_ratio))) {
                     disparity[i * sgm.width + j] = INVALID_FLOAT;
-					c0++;
                     continue;
                 }
             }
 
             if (best_disparity == sgm.option.min_disparity || best_disparity == sgm.option.max_disparity - 1) {
                 disparity[i * sgm.width + j] = INVALID_FLOAT;
-				c1++;
                 continue;
             }
             const uint16_t idx_1 = best_disparity - 1 - sgm.option.min_disparity;
@@ -490,28 +440,17 @@ static void ComputeDisparity(const uint16_t* cost_aggr, float* disparity, int in
             disparity[(size_t)i * sgm.width + j] = (float)(best_disparity) + (float)(cost_1 - cost_2) / (denom * 2.0f);
         }
     }
-	printf("ComputeDisparity invalid count (uniqueness): %d\n", c0);
-	printf("ComputeDisparity invalid count (border): %d\n", c1);
 }
 
 static void LRCheck(float* disp_left, const float* disp_right)
 {
-	int c = 0;
-	int c2 = 0;
-	int c3 = 0;
-	int c4 = 0;
-	float sum1 = 0;
-	float sum2 = 0;
-	float sum3 = 0;
     for (uint16_t i = 0; i < sgm.height; i++) {
         for (uint16_t j = 0; j < sgm.width; j++) {
         	float disp = disp_left[i * sgm.width + j];
 			if(disp == INVALID_FLOAT){
-				c++;
 				continue;
 			}
 
-			sum1 += disp;
         	const int32_t col_right = (int32_t)(j - disp + 0.5);
         	if(col_right >= 0 && col_right < sgm.width) {
                 const float disp_r = disp_right[i * sgm.width + col_right];
@@ -519,28 +458,15 @@ static void LRCheck(float* disp_left, const float* disp_right)
 				{
 					continue;
 				}
-				sum2 += disp_r;
-				sum3 += fabs(disp - disp_r);
         		if (fabs(disp - disp_r) > sgm.option.lrcheck_thres) {
 					disp_left[i * sgm.width + j] = INVALID_FLOAT;
-					c2++;
                 }
-				c4++;
             }
             else {
                 disp_left[i * sgm.width + j] = INVALID_FLOAT;
-				c3++;
             }
         }
     }
-	printf("LRCheck invalid count: %d\n", c);
-	printf("LRCheck mismatch count: %d\n", c2);
-	printf("LRCheck out of bound count: %d\n", c3);
-	printf("LRCheck valid count: %d\n", c4);
-	printf("LRCheck disp_left sum: %f\n", sum1);
-	printf("LRCheck disp_right sum: %f\n", sum2);
-	printf("LRCheck disp diff sum: %f\n", sum3);
-	printf("check_thres: %f\n", sgm.option.lrcheck_thres);
 }
 
 /*
@@ -658,12 +584,6 @@ static uint32_t list_iterate(uint32_t* buffer, const uint32_t size, uint32_t* in
 }
 static void RemoveSpeckles(float* disparity_map, const uint8_t diff_insame)
 {
-	int cv = 0;
-	int ci = 0;
-	int c0 = 0;
-	int c1 = 0;
-	int c2 = 0;
-	int c3 = 0;
 	// std::vector<bool> visited(uint32(width*height),false);
 	uint8_t visited[MAX_IMG_SIZE];
 	uint32_t vec[MAX_IMG_SIZE]; // 50 = min_speckle_area
@@ -677,23 +597,14 @@ static void RemoveSpeckles(float* disparity_map, const uint8_t diff_insame)
 	for(uint32_t i = 0; i < sgm.height; i++) {
 		for(uint32_t j = 0; j < sgm.width; j++) {
 			const uint32_t p = i * sgm.width + j;
-			if (disparity_map[p] == INVALID_FLOAT) {
-				ci++;
-				continue;
-			} else {
-				cv++;
-			}
 			if (visited[p] == 1 || disparity_map[p] == INVALID_FLOAT) {
-				c0++;
 				continue;
 			}
-			c1++;
 			// std::vector<std::pair<int32_t, int32_t>> vec;
 			list_clear(&vec_index, &vec_size);
 			list_add(vec, &vec_size, p);
 			visited[p] = 1;
 			while (vec_index < vec_size) {
-				c2++;
 				const uint32_t pixel = list_iterate(vec, vec_size, &vec_index);
 				uint16_t row = (uint16_t)(pixel / sgm.width);
 				uint16_t col = (uint16_t)(pixel % sgm.width);
@@ -713,7 +624,6 @@ static void RemoveSpeckles(float* disparity_map, const uint8_t diff_insame)
 								fabs(disparity_map[next_pixel] - disp_base) <= (float)diff_insame) {
 								list_add(vec, &vec_size, next_pixel);
 								visited[next_pixel] = 1;
-								c3++;
 							}
 						}
 					}
@@ -729,9 +639,4 @@ static void RemoveSpeckles(float* disparity_map, const uint8_t diff_insame)
 			}
 		}
 	}
-	printf("RemoveSpeckles skipped invalid: %d (%d) = %d\n", ci, cv, cv + ci);
-	printf("RemoveSpeckles skipped count: %d\n", c0);
-	printf("RemoveSpeckles regions count: %d\n", c1);
-	printf("RemoveSpeckles visited pixels count: %d\n", c2);
-	printf("RemoveSpeckles added pixels count: %d\n", c3);
 }

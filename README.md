@@ -3,6 +3,13 @@ This project aims to develop a reproducible and modular stereo matching pipeline
 The system implements the Semi-Global Matching (SGM) algorithm for depth estimation from stereo image pairs, both as a pure software solution on the ARM processor and as a hardware-accelerated variant with a custom cost computation module in the programmable logic (PL).
 A dedicated test platform will evaluate different configurations using standard datasets such as KITTI 2012/2015 and Middlebury, providing a reliable baseline for performance, accuracy, and resource efficiency in reconfigurable stereo vision systems.
 
+## Project structure:
+- HostScript_Server: contains the test platform as Python code, which is executed on the host PC. (There is also a client.py script that can simulate a client.)
+- SemiGlobalMatching: contains a working implementation of the SemiGlobalMatching algorithm in C
+- ZedBoard/Vivado: contains the hardware description of the ZedBoard project
+- ZedBoard/Vitis: contains the software for the ZedBoard. On the one hand, the communication interface to the host PC, and on the other hand, the actual SGM implementation.
+- Documentation: contains the report for the project
+
 ## Objective
 The aim of this project is to develop a reproducible and modular stereo matching pipeline on a Zedboard with the Zynq SoC, which will serve as a foundation for future work in the field of partial reconfiguration (PR) and hardware-accelerated image processing.
 The focus is not on developing new algorithms, but on establishing a solid reference platform that allows different approaches, parameters, and hardware/software combinations to be objectively compared.
